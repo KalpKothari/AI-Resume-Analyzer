@@ -1,142 +1,100 @@
-from dotenv import load_dotenv
-
-load_dotenv()
-
 import streamlit as st
 import os
-from PIL import Image
-import io
-import pdf2image
-import base64
-import fitz
-
+import fitz  # PyMuPDF for PDF text extraction
 import google.generativeai as genai
+from dotenv import load_dotenv
 
-os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+# Load API Key from .env file
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-def get_gemini_response(input, pdf_content, prompt):
-    model = genai.GenerativeModel('gemini-pro')
-    response = model.generate_content([input, pdf_content, prompt])
+# Configure Google Gemini API
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Function to interact with Gemini API for ATS analysis
+def ask_gemini_query(job_desc, resume_text, analysis_type):
+    prompt_templates = {
+        "ATS Score": "Analyze the resume against the job description and provide an ATS score (0-100%).",
+        "Strengths & Weaknesses": "Analyze the resume for strengths and weaknesses compared to the job description.",
+        "Missing Keywords": "List important keywords missing from the resume that are present in the job description.",
+        "Course Suggestions": "Suggest 3-5 online courses that can help the candidate improve their skills based on the missing qualifications in the resume."
+    }
+    
+    prompt = f"{prompt_templates[analysis_type]}\n\nJob Description:\n{job_desc}\n\nResume:\n{resume_text}"
+    
+    model = genai.GenerativeModel("gemini-1.5-pro")
+    response = model.generate_content(prompt)
+    
+    return response.text  # Extract AI-generated text
+
+# Function to interact with Gemini API for "Ask Query" feature
+def ask_gemini_general_query(query_text, resume_text, job_desc):
+    prompt = f"""
+    You are an AI assistant helping with resume and job applications.
+    
+    Here is the Job Description:
+    {job_desc}
+    
+    Here is the Resume:
+    {resume_text}
+    
+    Question: {query_text}
+    
+    Answer in a helpful and detailed manner based on the provided job description and resume.
+    """
+    
+    model = genai.GenerativeModel("gemini-1.5-pro")
+    response = model.generate_content(prompt)
+    
     return response.text
 
-def input_pdf_setup(uploaded_file):
-    if uploaded_file is not None:
-        # Read the PDF file
-        document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        # Initialize a list to hold the text of each page
-        text_parts = []
+# Function to extract text from uploaded PDF resume
+def extract_text_from_pdf(uploaded_file):
+    document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    return " ".join([page.get_text() for page in document])
 
-        # Iterate over the pages of the PDF to extract the text
-        for page in document:
-            text_parts.append(page.get_text())
+# Streamlit UI Configuration
+st.set_page_config(page_title="AI Resume Analyzer", layout="wide")
+st.title("📄 AI Resume Analyzer")
+st.subheader("Analyze your resume, get ATS score, and find course recommendations!")
 
-        # Concatenate the list into a single string with a space in between each part
-        pdf_text_content = " ".join(text_parts)
-        return pdf_text_content
-    else:
-        raise FileNotFoundError("No file uploaded")
+# User Inputs
+job_description = st.text_area("📌 Enter Job Description:", height=150)
+uploaded_file = st.file_uploader("📂 Upload Your Resume (PDF)", type=["pdf"])
 
-## Streamlit App
+# Extract resume text if uploaded
+resume_text = ""
+if uploaded_file:
+    resume_text = extract_text_from_pdf(uploaded_file)
+    st.success("✅ Resume Uploaded Successfully")
 
-st.set_page_config(page_title="Resume Expert")
+# Analysis Options
+st.subheader("📝 Choose What to Analyze:")
+analysis_option = st.radio("Select an option:", [
+    "ATS Score",
+    "Strengths & Weaknesses",
+    "Missing Keywords",
+    "Course Suggestions"
+])
 
-st.header("JobFit Analyzer")
-st.subheader('This Application helps you in your Resume Review with help of GEMINI AI [LLM]')
-input_text = st.text_input("Job Description: ", key="input")
-uploaded_file = st.file_uploader("Upload your Resume(PDF)...", type=["pdf"])
-pdf_content = ""
+# Ask Query Feature
+st.subheader("❓ Ask Any Query:")
+query_text = st.text_area("Enter your question related to resume/job search:")
 
-if uploaded_file is not None:
-    st.write("PDF Uploaded Successfully")
-
-submit1 = st.button("Tell Me About the Resume")
-
-submit2 = st.button("How Can I Improvise my Skills")
-
-submit3 = st.button("What are the Keywords That are Missing")
-
-submit4 = st.button("Percentage match")
-
-input_promp = st.text_input("Queries: Feel Free to Ask here")
-
-submit5 = st.button("Answer My Query")
-
-input_prompt1 = """
- You are an experienced Technical Human Resource Manager,your task is to review the provided resume against the job description. 
-  Please share your professional evaluation on whether the candidate's profile aligns with the role. 
- Highlight the strengths and weaknesses of the applicant in relation to the specified job requirements.
-"""
-
-input_prompt2 = """
-You are an Technical Human Resource Manager with expertise in data science, 
-your role is to scrutinize the resume in light of the job description provided. 
-Share your insights on the candidate's suitability for the role from an HR perspective. 
-Additionally, offer advice on enhancing the candidate's skills and identify areas where improvement is needed.
-"""
-
-input_prompt3 = """
-You are an skilled ATS (Applicant Tracking System) scanner with a deep understanding of data science and ATS functionality, 
-your task is to evaluate the resume against the provided job description. As a Human Resource manager,
- assess the compatibility of the resume with the role. Give me what are the keywords that are missing
- Also, provide recommendations for enhancing the candidate's skills and identify which areas require further development.
-"""
-input_prompt4 = """
-You are an skilled ATS (Applicant Tracking System) scanner with a deep understanding of data science and ATS functionality, 
-your task is to evaluate the resume against the provided job description. give me the percentage of match if the resume matches
-the job description. First the output should come as percentage and then keywords missing and last final thoughts.
-"""
-
-if submit1:
-    if uploaded_file is not None:
-        pdf_content = input_pdf_setup(uploaded_file)
-        response = get_gemini_response(input_prompt1, pdf_content, input_text)
-        st.subheader("The Response is")
+# Analyze Resume Button
+if st.button("🔍 Analyze Resume"):
+    if uploaded_file and job_description:
+        response = ask_gemini_query(job_description, resume_text, analysis_option)
+        st.subheader("📊 AI Response:")
         st.write(response)
     else:
-        st.write("Please upload a PDF file to proceed.")
+        st.warning("⚠️ Please upload a resume and enter a job description.")
 
-elif submit2:
-    if uploaded_file is not None:
-        pdf_content = input_pdf_setup(uploaded_file)
-        response = get_gemini_response(input_prompt2, pdf_content, input_text)
-        st.subheader("The Response is")
+# Ask Query Button
+if st.button("💬 Ask Query"):
+    if query_text and uploaded_file and job_description:
+        response = ask_gemini_general_query(query_text, resume_text, job_description)
+        st.subheader("🤖 AI Response:")
         st.write(response)
     else:
-        st.write("Please upload a PDF file to proceed.")
-
-elif submit3:
-    if uploaded_file is not None:
-        pdf_content = input_pdf_setup(uploaded_file)
-        response = get_gemini_response(input_prompt3, pdf_content, input_text)
-        st.subheader("The Response is")
-        st.write(response)
-    else:
-        st.write("Please upload a PDF file to proceed.")
-
-elif submit4:
-    if uploaded_file is not None:
-        pdf_content = input_pdf_setup(uploaded_file)
-        response = get_gemini_response(input_prompt4, pdf_content, input_text)
-        st.subheader("The Response is")
-        st.write(response)
-    else:
-        st.write("Please upload a PDF file to proceed.")
-
-elif submit5:
-    if uploaded_file is not None:
-        pdf_content = input_pdf_setup(uploaded_file)
-        response = get_gemini_response(input_promp, pdf_content, input_text)
-        st.subheader("The Response is")
-        st.write(response)
-    else:
-        st.write("Please upload a PDF file to proceed.")
-
-footer = """
----
-#### Made By [Koushik](https://www.linkedin.com/in/gandikota-sai-koushik/)
-For Queries, Reach out on [LinkedIn](https://www.linkedin.com/in/gandikota-sai-koushik/)  
-*Resume Expert - Making Job Applications Easier*
-"""
-
-st.markdown(footer, unsafe_allow_html=True)
+        st.warning("⚠️ Please enter a query, upload a resume, and provide a job description.")
