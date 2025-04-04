@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-st.run(port=int(os.environ.get("PORT", 8501)))
 import fitz  # PyMuPDF for PDF text extraction
 import google.generativeai as genai
 from dotenv import load_dotenv
